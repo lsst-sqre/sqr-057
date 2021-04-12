@@ -47,48 +47,61 @@
 Introduction
 ============
 
-`Velero`_ is an open source tool to backup Kubernetes resources, including persistent volumes. 
-It is a good complement to Argo CD for disaster recovery, specially for stateful applications.
+`Velero`_ is an open-source tool to backup Kubernetes resources, including persistent volumes. 
+It is an excellent complement to `Argo CD`_ for disaster recovery and data migration scenarios.
 
 .. _Velero: https://velero.io
+.. _Argo CD: https://argoproj.github.io/projects/argo-cd
 
-With Argo CD you can redeploy your applications and preserve the application state as long as the persistent volumes are not lost. 
-If a persistent volume (or important data from a persistent volume) is lost, then a disaster recovery tool like Velero becomes important.
+With Argo CD, you can re-deploy your application and preserve the application state as long as the persistent volumes are preserved.
+If a persistent volume (or any data in a persistent volume) is lost, then a disaster recovery tool like Velero becomes essential.
 
-Velero implements custom resources like ``Backup``, ``Schedule``, and ``Restore``, and
-includes controllers that process the custom resources to perform backups, restores, and all related operations. 
-You can back up or restore all objects in your cluster, or you can filter objects by type, namespace, and/or label selectors.
+Velero implements custom resources like ``Backup``, ``Schedule``, and ``Restore`` and
+includes controllers that process these custom resources to perform the related operations. 
+You can back up or restore all Kubernetes objects in your cluster, or you can filter them by type, namespace, and/or label selectors.
 
 Velero has a plugin architecture to work with different `cloud providers`_. 
-It also supports backing up and restoring Kubernetes volumes using a free open source backup tool called `restic`_.
+But it also supports backing up and restoring Kubernetes volumes using a free open source backup tool called `restic`_.
 
 .. _cloud providers: https://velero.io/docs/v1.5/supported-providers
 .. _restic: https://github.com/restic/restic
 
-This technote shows how to install and use Velero with the Velero Google Cloud Platform plugin. The GCP plugin uses a Google Cloud Storage bucket for the backup/restore location and Google Compute Engine Snapshots to perform snapshots of the persistent volume disks.
+This technote shows how to install and use Velero with the Velero Google Cloud Platform (GCP) plugin. 
+The GCP plugin uses a Google Cloud Storage (GCS) bucket for the backup/restore location and Google Compute Engine (GCE) Snapshots to perform the persistent volume disks' snapshots.
 
 Installation
 ============
 
-Install Velero with the GCP plugin on an existing cluster.
+In this section, you will install Velero with the GCP plugin into an existing Google Kubernetes Engine (GKE) cluster.
 
 Create a GCS bucket
 -------------------
+
+Use the `gsutil`_ command-line tool to create a Cloud Storage bucket:
 
 .. prompt:: bash $,# auto
 
    BUCKET=<bucket>
    $ gsutil mb gs://$BUCKET/
- 
-Create a service account
-------------------------
+
+.. _gsutil: https://cloud.google.com/storage/docs/gsutil/commands/mb
+
+Create an IAM service account
+-----------------------------
+
+Use the `gcloud`_ command-line tool to create an IAM service account:
 
 .. prompt:: bash$ $,# auto 
 
    $ gcloud iam service-accounts create velero \
       --display-name "Velero service account"
 
-Get the ``project`` and service account ``email`` values:
+.. _gcloud: https://cloud.google.com/sdk/gcloud/reference/iam/service-accounts
+
+Create a role with enough permissions for Velero
+------------------------------------------------
+
+Get the ``project`` and service account ``email`` values and create a role with enough permissions for Velero:
 
 .. prompt:: bash$ $,# auto
 
@@ -96,12 +109,6 @@ Get the ``project`` and service account ``email`` values:
    SERVICE_ACCOUNT_EMAIL=$(gcloud iam service-accounts list \
       --filter="displayName:Velero service account" \
       --format 'value(email)')
-
-Create a role with enough permissions for Velero
-------------------------------------------------
-
-.. prompt:: bash$ $,# auto
-   
    ROLE_PERMISSIONS=(
       compute.disks.get
       compute.disks.create
@@ -130,7 +137,7 @@ Add an IAM policy binding to grant this role to Velero's GCP service account and
 Set permissions for Velero using Workload Identity 
 --------------------------------------------------
 
-Enable Workload Identity on an existing cluster: 
+Enable Workload Identity on your GKE cluster: 
 
 .. prompt:: bash$ $,# auto
    
@@ -139,16 +146,15 @@ Enable Workload Identity on an existing cluster:
    $ gcloud container clusters update $CLUSTER --zone=$ZONE \
       --workload-pool=$PROJECT_ID.svc.id.goog
 
-Updated the existing node pools, using the ``default-pool`` here:
+Updated the existing node pools:
 
 .. prompt:: bash$ $,# auto
 
-   NODE_POOLS=default-pool 
+   NODE_POOLS=<node-pools>
    $ gcloud container node-pools update $NODE_POOLS \
       --zone=$ZONE \
       --cluster=$CLUSTER \
       --workload-metadata=GKE_METADATA
-
 
 Add an IAM policy binding to grant Velero's Kubernetes service account access to the GCP service account.
 
@@ -160,8 +166,10 @@ Add an IAM policy binding to grant Velero's Kubernetes service account access to
       velero@$PROJECT_ID.iam.gserviceaccount.com
 
 
-Install Velero Server using the GCP plugin
+Install Velero server using the GCP plugin
 ------------------------------------------
+
+Finally, install the Velero server in your GKE cluster using the `Velero command-line client`_:
 
 .. prompt:: bash$ $,# auto 
 
@@ -174,11 +182,14 @@ Install Velero Server using the GCP plugin
       --backup-location-config serviceAccount=velero@$PROJECT_ID.iam.gserviceaccount.com \
       --wait
 
+.. _`Velero command-line client`: https://velero.io/docs/v1.5/basic-install/
 
 Backup and snapshot storage locations
 =====================================
 
-The Velero GCP plugin uses a GCS bucket to store backup and restore operations metadata, Kubernetes manifests for the resources included in the backup. The persistent volume backup is performed by `GCE disk snapshots`_. 
+The Velero GCP plugin uses a GCS bucket to store backup and restore metadata, and the Kubernetes manifests for the resources included in the backup. 
+
+The persistent volume backup is performed by `GCE disk snapshots`_. 
 
 .. _GCE disk snapshots: https://cloud.google.com/compute/docs/disks/snapshots
 
@@ -194,15 +205,15 @@ Example:
    NAME      PROVIDER
    default   gcp
 
-Snapshots incrementally back up data from persistent disks. 
+Snapshots incrementally backup data from persistent disks. 
 
 
 Velero backup and schedule
 ==========================
 
-For on-demand backups use the ``velero backup`` command, for scheduled backups use ``velero schedule``.
+For an on-demand backup use the ``velero backup`` command, and for an scheduled backup use the ``velero schedule`` command instead.
 
-**Example 1**: Schedule a backup of the entire application namespace every day with expiration time set to 30 days.
+**Example 1**: Schedule a backup of the entire application namespace every day with an expiration time set to 30 days.
 
 .. prompt:: bash$ $,# auto 
 
@@ -211,7 +222,7 @@ For on-demand backups use the ``velero backup`` command, for scheduled backups u
       --include-namespaces <app-namespace> \
       --ttl 720h
 
-**Example 2**: Schedule a back up of all persistent volumes in the cluster.
+**Example 2**: Schedule a backup of all persistent volumes in the cluster.
 
 .. prompt:: bash$ $,# auto 
 
@@ -231,7 +242,7 @@ For on-demand backups use the ``velero backup`` command, for scheduled backups u
 Velero restore
 ==============
 
-You can use mamespace mapping to restore the application to another namespace.
+You can use **namespace mapping** to restore the application to a different namespace.
 
 .. prompt:: bash$ $,# auto 
 
@@ -255,9 +266,9 @@ Disaster recovery
 
 Use Velero to restore the persistent volume from the back up.
 
-**Scenario 2:** "User A" accidentally deletes important data from an application, while "User B" writes data to the same application.
+**Scenario 2:** "User A" accidentally deletes data from an application, and "User B" writes data to the same application roughly at the same time.
 
-In this situation you cannot simply restore the persistent volume from the back up, but you can use Velero to restore the entire application namespace to a new namespace, connect to the application and manually restore the lost data.
+In this situation, you cannot simply restore the persistent volume from the backup. However, you can use Velero to restore the entire application namespace to a different namespace, connect to the application and manually restore the lost data.
 
 Data migration
 ==============
@@ -269,11 +280,13 @@ Use Argo CD to deploy the application to the new cluster and use Velero to resto
 A practical example
 ===================
 
-Let us take Chronograf as example of an stateful application to illustrate how to restore deleted data from a back up.
+Let us take `Chronograf`_ as an example of a stateful application to illustrate how to restore *deleted data* from a backup. In this context, *delete data* could be a Chronograf dashboard, a Chronograf organization, or any configuration saved in the Chronograf database.
 
-Assume Velero is already installed in the cluster, and that the backup bucket is properly configured as described above. 
+.. _`Chronograf`: https://docs.influxdata.com/chronograf/v1.8/
 
-Create a Velero ``Schedule`` as following:
+What follows assumes that Velero Server is installed in your cluster, and that the backup bucket is properly configured as described above. 
+
+Create a Velero ``Schedule`` as follows:
 
 .. prompt:: bash$ $,# auto 
 
@@ -282,9 +295,6 @@ Create a Velero ``Schedule`` as following:
       --include-namespaces chronograf \
       --ttl 720h
    Schedule "chronograf" created successfully.
-
-.. prompt:: bash$ $,# auto 
-   
    $ velero schedule get
    NAME         STATUS    CREATED                         SCHEDULE      BACKUP TTL   LAST BACKUP   SELECTOR
    chronograf   Enabled   2021-04-09 12:44:50 -0700 MST   @every 24h    720h0m0s     4s ago        <none>
@@ -301,7 +311,7 @@ Restore the Chronograf application from the backup, but to a **different namespa
    Restore request "chronograf-20210409131002" submitted successfully.
    Run `velero restore describe chronograf-20210409131002` or `velero restore logs chronograf-20210409131002` for more details.
 
-Use the following to disable authentication in the restored Chronograf application, otherwise you'll be redirected to the original Chronograf application URL.
+Use the following to disable authentication in the restored Chronograf application, otherwise, you'll be redirected to the original Chronograf application URL after logging in.
 
 .. prompt:: bash$ $,# auto
 
@@ -319,8 +329,7 @@ Connect to the restored Chronograf application:
 
    $ kubectl port-forward -n chronograf-restored service/chronograf-chronograf 8000:80
 
-Finally, export the lost dashboard from the restored Chronograf application at ``http://localhost:8000``.
- 
+Finally, export the deleted dashboard from the restored Chronograf application at ``http://localhost:8000``.
 
 .. Do not include the document title (it's automatically added from metadata.yaml).
 
